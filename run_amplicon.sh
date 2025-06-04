@@ -6,7 +6,7 @@ show_help() {
 cat <<EOF
 Usage: $(basename "$0") [OPTIONS] <FASTQ> [FASTQ2] <GENOME_DIR>
 
-A minimal RRBS processing pipeline using trim_galore, bismark, and MultiQC.
+A minimal amplicon-seq processing pipeline using trim_galore, bismark, and MultiQC.
 
 Positional Arguments:
   <FASTQ>           Input FASTQ file (R1 for paired-end or single-end)
@@ -75,7 +75,7 @@ fi
 LOGFILE="${SAMPLE}.log"
 
 timestamp=$(date "+%Y-%m-%d %H:%M:%S")
-echo "RRBS pipeline started at $timestamp" > "$LOGFILE"
+echo "Amplicon-seq pipeline started at $timestamp" > "$LOGFILE"
 echo "Sample: $SAMPLE | Mode: ${MODE}-end | Dry-run: $DRY_RUN" >> "$LOGFILE"
 echo "==========================================" >> "$LOGFILE"
 
@@ -112,11 +112,11 @@ fi
 # ────────────────────────────────────────────
 log_step "2" "Trim Galore"
 if [[ "$MODE" == "paired" ]]; then
-    run_cmd trim_galore --paired --rrbs "$R1" "$R2"
+    run_cmd trim_galore --paired "$R1" "$R2"
     TRIMMED_1="${SAMPLE}.R1_val_1.fq.gz"
     TRIMMED_2="${SAMPLE}.R2_val_2.fq.gz"
 else
-    run_cmd trim_galore --rrbs "$FASTQ"
+    run_cmd trim_galore  "$FASTQ"
     TRIMMED="${SAMPLE}.R1_trimmed.fq.gz"
 fi
 
@@ -132,43 +132,34 @@ else
     BAM="${SAMPLE}.R1_trimmed_bismark_bt2.bam"
 fi
 
-# ────────────────────────────────────────────
-# Step 4: Deduplication
-# ────────────────────────────────────────────
-log_step "4" "Deduplicate BAM"
-if [[ "$MODE" == "paired" ]]; then
-    run_cmd deduplicate_bismark --paired "$BAM"
-    DEDUP_BAM="${SAMPLE}.R1_val_1_bismark_bt2_pe.deduplicated.bam"
-else
-    run_cmd deduplicate_bismark "$BAM"
-    DEDUP_BAM="${SAMPLE}.R1_trimmed_bismark_bt2.deduplicated.bam"
-fi
 
 # ────────────────────────────────────────────
-# Step 5: Methylation Extraction
+# Step 4: Methylation Extraction
 # ────────────────────────────────────────────
-log_step "5" "Methylation Extraction"
+log_step "4" "Methylation Extraction"
 METH_CMD="bismark_methylation_extractor"
 [[ "$MODE" == "paired" ]] && METH_CMD+=" --paired-end"
-METH_CMD+=" --bedGraph --gzip --no_overlap --output . $DEDUP_BAM"
+METH_CMD+=" --bedGraph --gzip --no_overlap --output . $BAM"
 run_cmd $METH_CMD
 
 # ────────────────────────────────────────────
-# Step 6: MultiQC
+# Step 5: BismarkQC & MultiQC
 # ────────────────────────────────────────────
-log_step "6" "MultiQC"
+log_step "5" "BismarkQC & MultiQC"
+run_cmd bismark2report
+run_cmd bismark2summary
 run_cmd multiqc . --outdir .
 
 
 # ────────────────────────────────────────────
 # Cleanup: Remove intermediate files
 # ────────────────────────────────────────────
-log_step "7" "Cleanup Intermediate Files"
-run_cmd rm -f *deduplicated.txt.gz *bt2.bam *M-bias.txt *val_*.fq.gz
+log_step "6" "Cleanup Intermediate Files"
+run_cmd rm -f *.txt.gz  *M-bias.txt *val_*.fq.gz
 
 # Recreate key outputs
-run_cmd mv "$DEDUP_BAM" "${SAMPLE}.deduplicated.bam"
-DEDUP_BAM="${SAMPLE}.deduplicated.bam"
+run_cmd mv "$BAM" "${SAMPLE}.bam"
+BAM="${SAMPLE}.bam"
 
 # ────────────────────────────────────────────
 # Summary
@@ -181,8 +172,8 @@ echo -e "\n========== SUMMARY =========="
 echo "Sample name     : $SAMPLE"
 echo "Mode            : $MODE"
 echo "Genome index    : $GENOME_DIR"
-echo "Final BAM       : $DEDUP_BAM"
-echo "Methylation     : ${DEDUP_BAM%.bam}_Methylation_report.txt (or .gz/bedGraph)"
+echo "Final BAM       : $BAM"
+echo "Methylation     : ${BAM%.bam}_Methylation_report.txt (or cov.gz/bedGraph.gz)"
 echo "QC Report       : multiqc_report.html"
 echo "Log saved to    : $LOGFILE"
 } >> "$LOGFILE"
