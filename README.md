@@ -35,7 +35,7 @@ Open or knit ampliconseq_analysis.Rmd in RStudio or via command line to generate
 ```
 rmarkdown::render("ampliconseq_analysis.Rmd")
 ```
-## Processing Logging
+## Preprocessing Logging
 
 Each major processing step is logged to a file with command and execution details (sampleX.log).
 
