@@ -37,6 +37,8 @@ rmarkdown::render("ampliconseq_analysis.Rmd")
 ```
 
 ## Visualization
+One exmaple plot to visualize the DNA methylation level at targeted genomic regions (for samples of different conditions):
+
 ![Example plot](./cpg_gene_plot.png)
 
 ## License
