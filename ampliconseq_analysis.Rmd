@@ -1,0 +1,167 @@
+---
+title: "Amplicon-seq analysis"
+output: html_document
+author: "Liangxi Wang"
+date: "2024-10-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source("~/global.R")
+setwd("~/project")
+set.seed(2024)
+
+```
+
+# Analysis
+I include important QC and preliminary analyses here
+
+```{r message=F, warning=F, results=F}
+
+# construct the metadata info table
+meta_info <- read.table("TF_IVFPilotStudy2024_Metadata.csv", header=T, sep = ",")
+meta_info %<>% subset(ind!= "P4") # temporarily remove 3 samples from P4 because the data is incomplete
+meta_info %<>% subset(number!=1) # remove sample number 1, since it is a clear outlier from PCA and heatmap
+
+# read in amplicon-seq data
+files <- paste0("fastq_092024/", meta_info$number, ".bismark.cov.gz")
+m_all <- readBismark2DGE(files, sample.names = meta_info$number)
+
+# remove random contigs
+keep <- rep(T, nrow(m_all))
+Chr <- as.character(m_all$genes$Chr)
+keep[grepl("chrUn",Chr)] <- F
+keep[grepl("random",Chr)] <- F
+
+m_all <- m_all[keep,,keep.lib.sizes=F]
+
+
+
+# read in the cpgs residing in target regions:
+files2 <- paste0("./fastq_092024/filter/", meta_info$number, ".bismark.cov.gz")
+m_filter <- readBismark2DGE(files2, sample.names = meta_info$number)
+
+# get a sense of how efficient the assay is: targeted reads vs non-specific reads
+Methylation <- gl(2,1, 20*2, labels=c("Me","Un"))
+Sample <- meta_info$number
+Coverage_all <- m_all$counts[,Methylation=="Me"] + m_all$counts[,Methylation=="Un"]
+Coverage <- m_filter$counts[,Methylation=="Me"] + m_filter$counts[,Methylation=="Un"]
+
+ratio <- colSums(Coverage)/colSums(Coverage_all)
+ratio %>% data.frame(xx=.) %>% ggplot(aes(x=xx))+
+  geom_histogram()+
+  labs(x="percentage of specific reads")+
+  theme_slides
+# 80-86% of reads that are speicific to the target regions. Should be very good
+
+# histogram to get a sense of filtering cutoff choice for specific reads
+Coverage %>% as.data.frame %>% gather(sample,counts,"2-Me":"21-Me") %>% 
+  ggplot(aes(x=log10(counts), color=sample))+
+    geom_density()+
+    geom_vline(xintercept=2)+
+    theme_slides
+# based on the plot, cutoff from 100 to 1000 should be a reasonable cutoff, here we choose 100 as cutoff.
+
+# filter out low count sites: we require cpg sites to have more than 100 reads across all samples
+Coverage %<>% apply(2, function(x) ifelse(x>=100,x,NA))
+
+## in the end, only 183 cpgs left.... not sure if its too small the number
+methy_val <- na.omit(m_filter$counts[, Methylation=="Me"]* 100/Coverage)
+
+## look at the methylation value distribution
+methy_val %>% as.data.frame %>% gather(sample,val,"2-Me":"21-Me") %>% 
+  ggplot(aes(x=val, color=sample))+
+    geom_density()+
+    labs(x="methylation value (%)")+
+    theme_slides
+
+
+## PCA
+library(plotly)
+library(ggfortify)
+
+methy_val.df <- t(methy_val) %>% as.data.frame %>% rownames_to_column("sample")
+methy_val.df %<>% cbind(meta_info)
+
+methy_val.pca <- prcomp(t(methy_val))
+
+p <- autoplot(methy_val.pca, data=methy_val.df, color="condition", shape="ind", size=6, alpha=0.8)
+p <- p + scale_color_manual(values=brewer.pal(n=10,name="Set2"))+
+        scale_shape_manual(values=c(0:4,7,10))+
+        theme_slides
+
+ggplotly(p)
+#print(p)
+#ggsave("./pca_total.pdf", width=10, height=7)
+
+
+## generate heatmap to explore patterns
+
+
+
+M_color <- list(condition=brewer.pal(7,"Set1"), ind=brewer.pal(3, "Set2")[1:3])
+names(M_color$condition) <-  factor(meta_info$condition %>% unique)
+names(M_color$ind) <- factor(meta_info$ind %>% unique)
+
+
+l1 <- pheatmap(
+  mat               = methy_val,
+  color             = colorRampPalette(c("white","darkred"))(100),
+  border_color      = "gray",
+  show_colnames     = ,
+  show_rownames     = F,
+  #drop_levels       = TRUE,
+  # cluster_cols = M_cor_cluster_cols,
+  # cluster_rows = M_cor_cluster_rows,
+  annotation_col = meta_info %>% mutate(number=paste0(number,"-Me")) %>%rownames_to_column("xx") %>% select(-xx) %>%column_to_rownames("number"),
+  annotation_colors=M_color,
+  # cellwidth = 30,
+  #cellheight = 15,
+
+  #fontsize = 7,
+  main              = ""
+  # treeheight_row = 100,
+  # treeheight_col = 100
+)
+write_fig(l1,"./methyl_val_all.pdf",width=20, height=15)
+
+methy_val %>% as.data.frame %>% rownames_to_column("cpg_site") %>% write_csv("./methyl_val_matrix.csv")
+
+## here we mannually add the gene annotation to each cpg
+associated_gene <- read.table("./cpg_gene_list_v2.txt",header=F)
+
+methy_val.table <- methy_val %>% as.data.frame %>% rownames_to_column("cpg_site")
+methy_val.table$gene <- associated_gene$V1
+
+methy_val.table %<>% mutate(position=str_replace(cpg_site,"chr.*?-","") %>% as.numeric)
+
+meta_info2 <- meta_info %>% mutate(id=paste0(number,"-Me")) %>% select(-number)
+
+# methy_val.table %>% gather(id,val,"1-Me":"21-Me") %>% left_join(meta_info2, "id") %>% ggplot(aes(position,val, color=condition, shape=ind))+
+#   geom_point()+
+#   facet_wrap(~gene,scales = "free")
+
+chr_range <- methy_val.table %>% gather(id,val,"2-Me":"21-Me") %>% left_join(meta_info2, "id") %>% group_by(gene) %>%
+ dplyr::summarize(
+    x_min = min(position),
+    x_max = max(position),
+    label = paste0("chr:", x_min, "-", x_max,";",x_max-x_min,"bp."))
+
+methy_val.table %>% gather(id,val,"2-Me":"21-Me") %>% left_join(meta_info2, "id") %>% ggplot(aes(position,val, color=condition, fill=condition))+
+  geom_smooth()+
+  scale_x_continuous(breaks = unique(methy_val.table %>% gather(id,val,"2-Me":"21-Me") %>% left_join(meta_info2, "id") %>% select(position) %>% unlist))+
+  facet_wrap(~gene,scales = "free")+
+  geom_text(data = chr_range, aes(x = Inf, y = Inf, label = label),
+            hjust = 1, vjust = 1.5, size = 4, inherit.aes = FALSE)+
+  scale_color_manual(values=c(brewer.pal(8,"Set1"))[-6])+
+  scale_fill_manual(values=c(brewer.pal(8,"Set1"))[-6])+
+  labs(x="", y="Methlyation percentage (%)")+
+  theme_slides+
+  theme(
+    axis.text.x = element_blank()  
+  )
+ggsave("./cpg_gene_plot.pdf", width=15, height=10)
+
+
+```
+
