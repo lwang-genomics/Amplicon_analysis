@@ -14,7 +14,7 @@ Amplicon-seq is a targeted sequencing method that enables high-throughput analys
 	bismark (with Bowtie2)
 	samtools
 	R with the following packages:
-	- ggplot2, pheatmap, tidyverse, plotly, ggfortify, etc.
+	- edgeR, ggplot2, pheatmap, tidyverse, plotly, ggfortify, etc.
 
 See the .Rmd file for package usage.
 
