@@ -95,6 +95,8 @@ One exmaple plot to visualize the DNA methylation level at targeted genomic regi
 
 ![Example plot](./cpg_gene_plot.png)
 
+[For more figures, please refer to the HTML report.](https://lwang-genomics.github.io/Amplicon_analysis/)
+
 ## License
 
 MIT License
